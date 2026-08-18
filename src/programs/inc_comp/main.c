@@ -110,6 +110,9 @@ main(int argc, char *argv[])
 	return 1;
     }
 
+    ckd_free(veclen);
+    veclen = NULL;
+
     var_is_full = cmd_ln_int32("-fullvar");
     if (var_is_full) {
 	if (s3gau_read_full(cmd_ln_str("-invarfn"),
@@ -120,6 +123,8 @@ main(int argc, char *argv[])
 			    &veclen) != S3_SUCCESS) {
 	    return 1;
 	}
+	gauden_floor_variance_array_full(fullvar, n_mgau, n_feat, n_density,
+					 veclen, GAUDEN_EVAL_VAR_FLOOR);
     }
     else {
 	if (s3gau_read(cmd_ln_str("-invarfn"),
@@ -130,6 +135,8 @@ main(int argc, char *argv[])
 		       &veclen) != S3_SUCCESS) {
 	    return 1;
 	}
+	gauden_floor_variance_array(var, n_mgau, n_feat, n_density, veclen,
+				    GAUDEN_EVAL_VAR_FLOOR);
     }
 
     if (s3gaudnom_read(cmd_ln_str("-dcountfn"),
@@ -225,4 +232,3 @@ main(int argc, char *argv[])
 
     return 0;
 }
-

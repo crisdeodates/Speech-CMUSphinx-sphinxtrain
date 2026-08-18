@@ -1,0 +1,279 @@
+SphinxTrain 5.0.0
+=================
+
+This is SphinxTrain, Carnegie Mellon University's open source acoustic
+model trainer. This directory contains the scripts and instructions
+necessary for building models for the CMU Sphinx Recognizer.
+
+This distribution is free software, see LICENSE for licence.
+
+For up-to-date information, please see the web site at
+
+   https://cmusphinx.github.io
+
+Among the interesting resources there, you will find a link to
+"Resources to build a recognition system", with pointers to a
+dictionary, audio data, acoustic model etc.
+
+For introduction in training the acoustic model see the tutorial
+
+https://cmusphinx.github.io/wiki/tutorialam
+
+Installation Guide:
+-------------------
+
+This sections contain installation guide for various platforms. 
+
+All Platforms:
+--------------
+
+You will unfortunately need both Perl and Python to use the scripts
+provided. Linux usually comes with some version of Perl and Python. If
+you do not have Perl installed, please check:
+
+http://www.perl.org
+
+where you can download it for free. For Windows, if you insist on not
+using Windows Subsystem for Linux, a popular version, ActivePerl, is
+available from ActiveState at:
+
+https://www.activestate.com/products/perl/
+
+Python for Windows can be obtained from:
+
+http://www.python.org/download/
+
+For some advanced techniques (which are not enabled by default) you
+will need NumPy and SciPy.  Packages for NumPy and SciPy can be
+obtained from:
+
+http://scipy.org/Download
+
+Or you can use Anaconda which makes all of this somewhat easier:
+
+https://www.anaconda.com/products/distribution
+
+If you wish to use the grapheme-to-phoneme support, you will need
+rather specific versions of
+[OpenFST](https://www.openfst.org/twiki/bin/view/FST/WebHome) and
+[OpenGRM
+NGram](https://www.opengrm.org/twiki/bin/view/GRM/NGramLibrary).  It
+is known to work with OpenFST 1.6.3, and known *not* to work with
+1.8.2. There is probably nothing you want in the latest version
+anyway, and compiling it will consume several hours of your life and
+several gigabytes of your disk for no good reason, so best to just use
+what Ubuntu 20.04 LTS or 22.04 LTS will install for you with:
+
+    apt install libfst-dev libngram-dev
+
+See the note about `-DBUILD_G2P=ON` below to enable G2P support.
+
+Linux/Unix Installation:
+------------------------
+
+This distribution uses CMake to find out basic information about your
+system, and should compile on most Unix and Unix-like systems, and
+certainly on Linux.  On reasonable Linux distributions, a suitable
+version of CMake (at least 3.14) can be installed with your package
+manager, or may already be there if you have installed development
+tools.
+
+On certain unreasonable distributions that are far too often installed
+on "enterprise" or "cloud" or HPC systems, the version of CMake is
+incredibly ancient, and the package manager will not help you, so you
+will have to install it manually, following the instructions at
+https://cmake.org/download/
+
+To build, simply run:
+
+    cmake -S . -B build
+    cmake --build build
+
+This should configure everything automatically. The code has been
+tested with gcc.
+
+To enable G2P, you need to add a magic incantation to the first
+command above, namely:
+
+    cmake -S . -B build -DBUILD_G2P=ON
+    
+You must also enable git submodules, e.g.:
+
+    git submodule init
+    
+You can also enable shared libraries with `-DBUILD_SHARED_LIBS=ON`,
+but I suggest that you *not* do that unless you have a very good
+reason.
+
+You do not need to install SphinxTrain to run it, simply run
+`scripts/sphinxtrain` from the source directory when initializing a
+training directory.
+
+PocketSphinx (decode and model export)
+--------------------------------------
+
+The final **decode** stage and PocketSphinx-format **sendump** export
+(stages 50 and 90) use binaries from
+[PocketSphinx](https://github.com/cmusphinx/pocketsphinx), not from the
+SphinxTrain build alone. CI pins **v5.1.0** and copies
+`pocketsphinx_batch` into `build/` after building PocketSphinx.
+
+Local setup (sibling checkout, same layout as CI):
+
+    git clone https://github.com/cmusphinx/pocketsphinx.git
+    cmake -S pocketsphinx -B pocketsphinx/build
+    cmake --build pocketsphinx/build
+    cp pocketsphinx/build/pocketsphinx_batch build/
+
+Or install PocketSphinx and ensure `pocketsphinx_batch` is on your
+`PATH` when running `sphinxtrain run`.
+
+After `sphinxtrain setup`, `etc/sphinx_train.resolved.json` lists decode
+paths under `derived` (`decode_hmm_dir`, `decode_sendump`,
+`pocketsphinx_batch`, `decode_language_model`, and related keys). Refresh
+with `sphinxtrain resolve-config -v` when you change `etc/sphinx_train.cfg`.
+
+Training writes PocketSphinx sendumps via `mk_s2sendump -pocketsphinx`
+into each HMM directory; decode expects that layout under
+`derived.decode_hmm_dir`.
+
+Regression check (fixtures under `test/res/hmm`, optional `pocketsphinx_batch`):
+
+    test/scripts/test_sendump_pocketsphinx.sh
+
+Feature extraction regression (`sphinx_fe` vs golden MFC checksum; run before
+changing `libs/libsphinxbase/fe` or `feat`):
+
+    test/scripts/test_feat_regression.sh
+
+PocketSphinx two-pass alignment ([PR #468](https://github.com/cmusphinx/pocketsphinx/pull/468))
+fixes `state_align_search.c` for `pocketsphinx align` / `-state_align yes`.
+Until that PR is merged upstream, SphinxTrain vendors the diff under
+`test/patches/` and CI applies it on top of the pinned PocketSphinx ref.
+Default training stage **21** still uses in-tree `sphinx3_align` (decode
+via `pocketsphinx_batch` does not use this path).
+
+Apply the workaround on a local PocketSphinx checkout:
+
+    test/scripts/apply_pocketsphinx_align_patch.sh /path/to/pocketsphinx
+    POCKETSPHINX_SRC=/path/to/pocketsphinx test/scripts/check_pocketsphinx_align_fix.sh
+
+After #468 is in a release tag: remove the patch, apply script, and CI apply
+step; bump `POCKETSPHINX_REF` in `.github/workflows/tests.yml` if needed.
+
+Tier 3.1 align spike (manual, one utterance on a trained export such as AN4):
+
+    SPIKE_EXPORT_ROOT=/path/to/an4 test/scripts/spike_pocketsphinx_align.sh
+
+When packaging SphinxTrain inside another project, prefer a full
+`git clone` over `git clone --depth 1` if you expect to track
+`master` later.  A shallow working tree will sometimes refuse a plain
+`git pull --ff-only` and require an explicit `git fetch --unshallow`
+first.
+
+Multipron alignment (optional stage 21)
+----------------------------------------
+
+After CI HMM training, the default configuration runs multipron force
+alignment so pronunciation-disambiguated transcripts can be written
+under `multipron_align/` in your project. This uses the `sphinx3_align`
+program built with the rest of the tree (`cmake --build build`).
+
+Set `$CFG_MULTIPRON` to `no` in `etc/sphinx_train.cfg` if you want to
+skip stage 21 and use only the original transcripts for later stages.
+
+Optional second CI pass (stage 22)
+
+After multipron (stage 21), you can set `$CFG_CI_REESTIMATE_AFTER_MULTIPRON`
+to `yes` to run **stage 22**, which repeats the same CI training driver as
+stage 20. Once the multipron transcript exists, `GetLists()` uses it for
+Baum–Welch, so this pass trains CI models on pronunciation-disambiguated
+text. It performs a **full** CI cycle again (including flat initialization)
+and **replaces** the CI model directory, roughly doubling CI time. Default
+is `no`.
+
+**Why second CI is off by default:** A normal `sphinxtrain run` is already
+**one CI pass + multipron (stage 21) + CD/BW on the multipron transcript**
+via `GetLists()` (with `$CFG_MULTIPRON_TRAINING` for graph-level variants in
+`bw`). That is the usual “multipron” path—not two CI passes. Stage 22 is
+opt-in when you want CI models re-estimated on disambiguated labels; gains are
+often modest while cost is ~another full CI, and bad alignments in stage 21
+can propagate. Enable with `$CFG_CI_REESTIMATE_AFTER_MULTIPRON = 'yes'` when
+you want to experiment.  Smoke test (Festvox SLT, stages 000/00/20/21/22):
+`SLT_QUICK=1 ./test/run_slt_two_ci_multipron.sh` after `cmake --build build`.
+
+Multipron training (CFG_MULTIPRON_TRAINING)
+-------------------------------------------
+
+Independent of the stage-21 alignment, the Baum-Welch estimator (`bw`)
+can build per-utterance training HMMs with parallel paths per
+pronunciation variant and sum posteriors across variants. This is on by
+default (`$CFG_MULTIPRON_TRAINING = 'yes'` in `etc/sphinx_train.cfg`);
+set it to `no` for SphinxTrain-parity behaviour, in which `bw` silently
+picks pronunciation variant `[1]` for every multi-pron word.
+
+It composes with `$CFG_MULTIPRON` (stage 21): the alignment chooses the
+best single variant per utterance for `sphinx3_align` supervision while
+`bw` still distributes EM mass across variants during training. The
+default templates leave both on.
+
+`bw` memory and CPU per utterance scale with the average number of
+pronunciation variants per word; for single-variant lexicons the
+overhead is negligible.
+
+You can also install SphinxTrain system-wide if you so desire:
+
+    sudo cmake --build build --target install
+
+This will put various files in `/usr/local/lib`,
+`/usr/local/libexec/sphinxbase` and `/usr/local/share/sphinxbase` and
+create `/usr/local/bin/sphinxbase`.
+
+Also, check the section title "All Platforms" above.
+
+Windows Installation:
+---------------------
+
+You can build with Visual Studio Code using the C++ and CMake
+extensions.  This will create all the binaries in `build\Debug` or
+`build\Release` depending on the configuration you select.  As above,
+you can run `python ..\sphinxtrain\scripts\sphinxtrain` (or whatever
+the path is to `scripts\sphinxtrain` in your source directory) to set
+up and run training.
+
+Note that you will need to have Perl on your path, among other things,
+and also, note that none of this has been tested, so we suggest you just
+use [Windows Subsystem for
+Linux](https://learn.microsoft.com/en-us/windows/wsl/install), which
+is really a lot faster and easier to use than the native Windows
+command-line.
+
+If you are using Windows Subsystem for Linux, the installation
+procedure is identical to the Unix installation.
+
+Also, check the section title "All Platforms" above.
+
+Acknowledgments
+---------------
+
+The development of this code has included support at different times
+by various United States Government agencies, under different programs,
+including the Defence Advanced Projects Agency (DARPA) and the
+National Science Foundation (NSF). We are grateful for their support.
+
+This work was built over a large number of years at CMU by most of the
+people in the Sphinx Group. Some code goes back to 1986. The most
+recent work in tidying this up for release includes the following,
+listed alphabetically (at least these are the people who are most
+likely able to help you).
+
+- Alan W Black (awb@cs.cmu.edu)
+- Arthur Chan (archan@cs.cmu.edu)
+- Evandro Gouvea (egouvea+@cs.cmu.edu)
+- Ricky Houghton (ricky.houghton@cs.cmu.edu)
+- David Huggins-Daines (dhdaines@gmail.com)
+- Kevin Lenzo (kevinlenzo@gmail.com)
+- Ravi Mosur
+- Long Qin (lqin@cs.cmu.edu)
+- Rita Singh (rsingh+@cs.cmu.edu)
+- Eric Thayer

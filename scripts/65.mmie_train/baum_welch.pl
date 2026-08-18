@@ -101,6 +101,9 @@ if (-d $numlatdir) {
 } elsif ($ST::CFG_FORCEDALIGN eq "yes") {
     $listoffiles   = "$ST::CFG_BASE_DIR/falignout/${ST::CFG_EXPTNAME}.alignedfiles";
     $transcriptfile = "$ST::CFG_BASE_DIR/falignout/${ST::CFG_EXPTNAME}.alignedtranscripts";
+} elsif (ShouldUseMultipronTranscript()) {
+    $listoffiles = $ST::CFG_LISTOFFILES;
+    $transcriptfile = MultipronTranscriptFile();
 } elsif ($ST::CFG_VTLN eq "yes") {
     $listoffiles   = "$ST::CFG_BASE_DIR/vtlnout/${ST::CFG_EXPTNAME}.alignedfiles";
     $transcriptfile = "$ST::CFG_BASE_DIR/vtlnout/${ST::CFG_EXPTNAME}.alignedtranscripts";
@@ -132,6 +135,10 @@ if (-r $MLLT_FILE) {
 	 -lda => $MLLT_FILE,
 	 -ldadim => $ST::CFG_LDA_DIMENSION);
 }
+
+push(@extra_args, -multipron => 'yes')
+    if (defined($ST::CFG_MULTIPRON_TRAINING)
+        and $ST::CFG_MULTIPRON_TRAINING eq 'yes');
 
 my $return_value = RunTool
     ('bw', $logfile, $ctl_counter,

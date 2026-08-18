@@ -83,9 +83,9 @@ validate_writeable_dir(char *switch_name, void *arg)
 	return FALSE;
     }	
 
-    if ((s.st_mode && S_IWOTH) ||
-	((s.st_uid == getuid()) && (s.st_mode && S_IWUSR)) ||
-	((s.st_gid == getgid()) && (s.st_mode && S_IWGRP))) {
+    if ((s.st_mode & S_IWOTH) ||
+	((s.st_uid == getuid()) && (s.st_mode & S_IWUSR)) ||
+	((s.st_gid == getgid()) && (s.st_mode & S_IWGRP))) {
 	return TRUE;
     }
     else {
@@ -124,9 +124,9 @@ validate_opt_writeable_dir(char *switch_name, void *arg)
 	return FALSE;
     }	
 
-    if ((s.st_mode && S_IWOTH) ||
-	((s.st_uid == getuid()) && (s.st_mode && S_IWUSR)) ||
-	((s.st_gid == getgid()) && (s.st_mode && S_IWGRP))) {
+    if ((s.st_mode & S_IWOTH) ||
+	((s.st_uid == getuid()) && (s.st_mode & S_IWUSR)) ||
+	((s.st_gid == getgid()) && (s.st_mode & S_IWGRP))) {
 	return TRUE;
     }
     else {
@@ -168,9 +168,9 @@ validate_readable_dir(char *switch_name, void *arg)
 	return FALSE;
     }	
 
-    if ((s.st_mode && S_IROTH) ||
-	((s.st_uid == getuid()) && (s.st_mode && S_IRUSR)) ||
-	((s.st_gid == getgid()) && (s.st_mode && S_IRGRP))) {
+    if ((s.st_mode & S_IROTH) ||
+	((s.st_uid == getuid()) && (s.st_mode & S_IRUSR)) ||
+	((s.st_gid == getgid()) && (s.st_mode & S_IRGRP))) {
 	return TRUE;
     }
     else {
@@ -549,6 +549,15 @@ If yo want to do parallel training for N machines. Run N trainers with \n\
 	  ARG_FLOAT32,
 	  "11.5",
 	  "Language model weight" },
+
+	{ "-multipron",
+	  ARG_BOOLEAN,
+	  "no",
+	  "Build per-utterance training HMMs with parallel paths per "
+	  "pronunciation variant; forward-backward sums posteriors "
+	  "across variants. Default no for SphinxTrain parity. "
+	  "Set $CFG_MULTIPRON_TRAINING = 'yes' in sphinx_train.cfg "
+	  "to enable this for every bw stage." },
 	/* end */
 	
 	cepstral_to_feature_command_line_macro(),

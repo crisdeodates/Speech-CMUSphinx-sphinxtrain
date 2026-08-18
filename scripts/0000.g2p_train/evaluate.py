@@ -77,18 +77,18 @@ def evaluate_testset(
 
     if verbose: print("Executing evaluation with command:")
     command = "%s -model %s -input %s -beam %d  -words yes -isfile yes -output_cost yes -output %s" \
-        % (os.path.join(pathtog2pdecoder, "phonetisaurus-g2p"), modelfile, wordlistfile, beam, hypothesisfile)
+        % (os.path.join(pathtog2pdecoder, "g2p_eval"), modelfile, wordlistfile, beam, hypothesisfile)
 #    print command
     os.system(command)
     references = {}
     for entry in open(referencefile,"r"):
 #        parts = entry.strip().split("  ")
-        parts = re.split(r' {2,}', entry.strip())
+        parts = re.split(r'(?:\t| {2,})', entry.strip())
         word  = parts.pop(0)
         references[word] = parts
     for entry in open(hypothesisfile,"r"):
         #word, score, hypothesis = entry.strip().split("  ")
-        word, score, hypothesis = re.split(r' {2,}', entry.strip())
+        word, score, hypothesis = re.split(r'(?:\t| {2,})', entry.strip())
 
     PERcalculator = ErrorRater( ignore=ignore, ignore_both=ignore_both, regex_ignore=regex_ignore )
     PERcalculator.compute_PER_phonetisaurus( hypothesisfile, referencefile, verbose=verbose )

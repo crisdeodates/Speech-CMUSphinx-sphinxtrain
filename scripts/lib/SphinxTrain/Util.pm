@@ -45,7 +45,8 @@ use vars qw(@ISA @EXPORT);
            ImgSrc LogWarning LogError LogProgress
            LogStatus Converged RunTool SubstParams
            RunScript LaunchScript WaitForScript GetLists GetDict
-	   WaitForConvergence TiedWaitForConvergence WaitForMMIEConverge Trim);
+	   WaitForConvergence TiedWaitForConvergence WaitForMMIEConverge Trim
+	   MultipronTranscriptFile ShouldUseMultipronTranscript);
 
 use Sys::Hostname;
 use File::Basename;
@@ -289,9 +290,10 @@ sub RunTool {
 
       # Windows needs the .exe suffix, but all OSes need to verify if
       # the file exists. The right test here would be "-x", but this
-      # doesn't work in Windows. We use the next best thing, "-e"
+      # doesn't do anything useful in Windows. We use the next best
+      # thing, "-e" (but make sure it isn't a directory...)
       foreach ("", ".exe") {
-	  if (-e "$fcmd$_") {
+	  if (-e "$fcmd$_" and not -d "$fcmd$_") {
 	      $cmd = "$fcmd$_";
 	      last;
 	  }
@@ -353,8 +355,10 @@ sub RunTool {
         $returnvalue = 1;
         last;
       }
-      $error_count++ if m/(ERROR).*/;
-      $warning_count++ if m/(WARNING).*/;
+      # Match Sphinx-style log lines only. A bare /ERROR/ false-positives on words like
+      # "TERROR" in transcripts; real messages are "ERROR: ..." (see sphinxbase err_msg).
+      $error_count++ if m/^\s*ERROR:/;
+      $warning_count++ if m/^\s*WARN(?:ING)?:/;
       if ($ctl_counter) {
 	# Keep track of progress being made.
 	$processed_counter++  if (/.*(utt\>).*/);
@@ -367,7 +371,16 @@ sub RunTool {
 	}
       }
     }
-    close $pipe;
+    unless (close $pipe) {
+      if ($!) {
+        $returnvalue = $!;
+        LogError("Exec failed: $!");
+      }
+      else {
+        $returnvalue = $? >> 8;
+        LogError("Subprocess failed with return code $returnvalue");
+      }
+    }
     print "\n" if $ctl_counter;
     if ($error_count > 0) {
 	LogError("This step had $error_count ERROR messages and " .
@@ -444,7 +457,33 @@ sub LaunchScript {
 
 sub WaitForScript {
     foreach my $id (@_) {
-        $ST::Q->waitfor_job($id);
+        my $exit = 0;
+        if (defined($ST::CFG_QUEUE_TYPE) && $ST::CFG_QUEUE_TYPE eq 'Queue') {
+            # Synchronous Queue: $id is wait status from system(), not a pid.
+            $exit = $id >> 8;
+        }
+        else {
+            my $reaped = $ST::Q->waitfor_job($id);
+            # $? only describes our child when waitpid() actually reaped it.
+            # waitpid() returns -1 when the child was already reaped (or is not
+            # ours); there is no status to read, so do not manufacture a
+            # failure out of a stale $? -- that is how an already-finished job
+            # became a spurious "exit code 255" (-1 >> 8 == -1).  A signal
+            # death is reported as 128+signo instead of being masked to 0.
+            if (defined($reaped) && $reaped == -1) {
+                $exit = 0;
+            }
+            elsif ($? & 127) {
+                $exit = 128 + ($? & 127);
+            }
+            else {
+                $exit = $? >> 8;
+            }
+        }
+        if ($exit != 0) {
+            LogError("Parallel job failed with exit code $exit\n");
+            exit $exit;
+        }
     }
 }
 
@@ -465,7 +504,7 @@ sub WaitForConvergence {
 	    }
 	    open LOG, "<$norm_log" or last;
 	    while (<LOG>) {
-		if (/failed/ or /Aborting/) {
+		if (/failed/i or /Aborting/) {
 		    LogError("Training failed in iteration $iter");
 		    return -1;
 		}
@@ -508,7 +547,7 @@ sub TiedWaitForConvergence {
 						   "$ST::CFG_EXPTNAME.$ngau.$iter.norm.log");
 		open LOG, "<$norm_log" or last ITER;
 		while (<LOG>) {
-		    if (/failed/ or /Aborting/) {
+		    if (/failed/i or /Aborting/) {
 			Log("Training failed in iteration $iter");
 			return -1;
 		    } elsif (/COMPLETE/) {
@@ -564,7 +603,7 @@ sub WaitForMMIEConverge {
 
       open LOG, "<$norm_log" or last;
       while (<LOG>) {
-	if (/failed/ or /Aborting/) {
+	if (/failed/i or /Aborting/) {
 	  LogError("Training failed in iteration $iter");
 	  return -1;
 	}
@@ -595,38 +634,58 @@ Select and return the appropriate dictionary depending on predefined variables.
 =cut
 
 sub GetDict {
+    my $path = SphinxTrain::Resolved::derived("dictionary");
+    return $path if defined $path && $path ne "";
+
     if ($ST::CFG_FORCE_ALIGN_SPD eq "yes") {
 	return File::Spec->catfile($ST::CFG_BASE_DIR, "falignout",
 				   "${ST::CFG_EXPTNAME}.spdict");
     }
-    else {
-        my $dictfn;
-        if (defined $ST::CFG_G2P_MODEL && $ST::CFG_G2P_MODEL eq "yes") {
-            $dictfn = "$ST::CFG_DICTIONARY.full"
-        }
-        else {
-            $dictfn = "$ST::CFG_DICTIONARY"
-        }
-        return $dictfn;
+    if (defined $ST::CFG_G2P_MODEL && $ST::CFG_G2P_MODEL eq "yes") {
+        return "$ST::CFG_DICTIONARY.full";
     }
+    return $ST::CFG_DICTIONARY;
+}
+
+sub MultipronTranscriptFile {
+    my $path = SphinxTrain::Resolved::derived("multipron_transcript");
+    return $path if defined $path && $path ne "";
+    return "$ST::CFG_BASE_DIR/multipron_align/${ST::CFG_EXPTNAME}.multipron.transcription";
+}
+
+# Multipron is on unless CFG_MULTIPRON is explicitly no. Use the multipron transcript
+# only after stage 21 has produced the file (after CI when multipron is enabled).
+sub ShouldUseMultipronTranscript {
+    if (defined $SphinxTrain::Resolved::DOC) {
+        return SphinxTrain::Resolved::derived("should_use_multipron_transcript");
+    }
+    return 0 unless defined($ST::CFG_MULTIPRON);
+    return 0 if $ST::CFG_MULTIPRON eq "no";
+    return -f MultipronTranscriptFile();
 }
 
 sub GetLists {
     # aligned transcripts and the list of aligned files is obtained as a result
     # of (03.) forced alignment or (04.) VTLN
     my ($listoffiles, $transcriptfile);
-    if ($ST::CFG_FORCE_ALIGN_SPD eq "yes") {
+    if ($ST::CFG_VTLN eq "yes") {
+	$listoffiles   = "$ST::CFG_BASE_DIR/vtlnout/${ST::CFG_EXPTNAME}.alignedfiles";
+	$transcriptfile  = "$ST::CFG_BASE_DIR/vtlnout/${ST::CFG_EXPTNAME}.alignedtranscripts";
+    } elsif ($ST::CFG_FORCE_ALIGN_SPD eq "yes") {
 	$listoffiles     = "$ST::CFG_BASE_DIR/falignout/${ST::CFG_EXPTNAME}.alignedfiles";
 	$transcriptfile  = "$ST::CFG_BASE_DIR/falignout/${ST::CFG_EXPTNAME}.sptranscripts";
     } elsif ($ST::CFG_FORCEDALIGN eq "yes") {
 	$listoffiles   = "$ST::CFG_BASE_DIR/falignout/${ST::CFG_EXPTNAME}.alignedfiles";
 	$transcriptfile  = "$ST::CFG_BASE_DIR/falignout/${ST::CFG_EXPTNAME}.alignedtranscripts";
-    } elsif ($ST::CFG_VTLN eq "yes") {
-	$listoffiles   = "$ST::CFG_BASE_DIR/vtlnout/${ST::CFG_EXPTNAME}.alignedfiles";
-	$transcriptfile  = "$ST::CFG_BASE_DIR/vtlnout/${ST::CFG_EXPTNAME}.alignedtranscripts";
+    } elsif (ShouldUseMultipronTranscript()) {
+	$listoffiles = SphinxTrain::Resolved::derived("train_listoffiles")
+	    || $ST::CFG_LISTOFFILES;
+	$transcriptfile = MultipronTranscriptFile();
     } else {
-	$listoffiles = $ST::CFG_LISTOFFILES;
-	$transcriptfile = $ST::CFG_TRANSCRIPTFILE;
+	$listoffiles = SphinxTrain::Resolved::derived("train_listoffiles")
+	    || $ST::CFG_LISTOFFILES;
+	$transcriptfile = SphinxTrain::Resolved::derived("train_transcript")
+	    || $ST::CFG_TRANSCRIPTFILE;
     }
     return ($listoffiles, $transcriptfile);
 }
